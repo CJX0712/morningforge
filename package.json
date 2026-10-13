@@ -1,0 +1,29 @@
+{
+  "name": "morningforge",
+  "version": "1.0.0",
+  "description": "MorningForge · 零依赖、可被不变量交叉验证的 AI/ML 基础算法库（纯 JavaScript ESM，浏览器 + Node 同码运行）。",
+  "type": "module",
+  "main": "src/index.mjs",
+  "scripts": {
+    "test": "node test/run.mjs",
+    "demo": "python -m http.server 5173"
+  },
+  "keywords": [
+    "ai",
+    "machine-learning",
+    "autograd",
+    "svd",
+    "pca",
+    "kmeans",
+    "transformer",
+    "numerical-linear-algebra",
+    "zero-dependency",
+    "verified-invariants"
+  ],
+  "author": "晨星 (CJX0712)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CJX0712/morningforge.git"
+  }
+}

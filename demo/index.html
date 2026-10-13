@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MorningForge · 晨星锻造 — 算法可视化演示</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --border: #e5e7eb;
+    --text: #1f2430;
+    --muted: #6b7280;
+    --accent: #3b6cf6;
+    --up: #e5484d;   /* 涨 · 红 */
+    --down: #2f9e44; /* 跌 · 绿 */
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  header { padding: 28px 24px 12px; max-width: 1120px; margin: 0 auto; }
+  header h1 { margin: 0; font-size: 26px; letter-spacing: .5px; }
+  header h1 span { color: var(--accent); }
+  header p { margin: 6px 0 0; color: var(--muted); }
+  .badge { display:inline-block; background:#e8eefc; color:#2b52c9; border-radius:6px; padding:1px 8px; font-size:12px; margin-left:8px; }
+  main { max-width: 1120px; margin: 0 auto; padding: 16px 24px 48px; display: grid; gap: 18px; grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 820px){ main { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .card h2 { margin: 0 0 2px; font-size: 17px; }
+  .card .desc { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .card canvas { width: 100%; height: 260px; display: block; background: #fbfcfe; border: 1px solid var(--border); border-radius: 8px; }
+  .meta { margin-top: 10px; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 14px; }
+  .meta b { color: var(--text); font-weight: 600; }
+  .bar { height: 6px; background: #eef0f4; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); }
+  .inv { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .inv code { background:#f0f2f6; border-radius:4px; padding:0 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>晨星锻造 <span>MorningForge</span><span class="badge">零依赖 · 8/8 不变量自检</span></h1>
+  <p>每个模块站在世界级成果之上（Karpathy micrograd · Hestenes SVD · Jolliffe PCA · Lloyd+k-means++ · Vaswani 注意力 · Adam），由数学不变量交叉验证。下方演示直接 import 库源码运行。</p>
+</header>
+<main>
+  <section class="card">
+    <h2>① 主成分分析 PCA</h2>
+    <p class="desc">3D 强相关数据 → 协方差特征分解 → 投影到前 2 主成分。</p>
+    <canvas id="pca"></canvas>
+    <div class="meta"><span>累计方差 PC1: <b id="v1"></b></span><span>PC1+PC2: <b id="v2"></b></span></div>
+    <p class="inv">不变量：协方差对称 PSD · 累计方差单调 · 重构误差随 k 递减</p>
+  </section>
+
+  <section class="card">
+    <h2>② k-means 聚类</h2>
+    <p class="desc">k-means++ 初始化 + Lloyd 迭代；3 个高斯簇。</p>
+    <canvas id="kmeans"></canvas>
+    <div class="meta"><span>惯性 SSE: <b id="inertia"></b></span><span>迭代: <b id="iters"></b> 次收敛</span></div>
+    <p class="inv">不变量：惯性（SSE）单调非增</p>
+  </section>
+
+  <section class="card">
+    <h2>③ 多层感知机 MLP</h2>
+    <p class="desc">自动微分 + Adam 训练 2→16→16→3 分类螺旋数据集，渲染决策边界。</p>
+    <canvas id="mlp"></canvas>
+    <div class="bar"><i id="accbar"></i></div>
+    <div class="meta"><span>训练准确率: <b id="acc"></b></span><span>末轮损失: <b id="loss"></b></span></div>
+    <p class="inv">不变量：训练损失单调下降 · 梯度检验 maxRelErr ≤ 1e-7</p>
+  </section>
+
+  <section class="card">
+    <h2>④ 缩放点积注意力</h2>
+    <p class="desc">T×T 注意力权重矩阵热力图，每行经 softmax 后和为 1。</p>
+    <canvas id="attn"></canvas>
+    <div class="meta"><span>最大行和偏差: <b id="rowsum"></b></span></div>
+    <p class="inv">不变量：softmax 行和 = 1 · 梯度检验通过</p>
+  </section>
+</main>
+
+<script type="module">
+import { mulberry32, pca, kmeans, makeMLP, adamStep, makeSpiral, attentionWeights, Value } from '../src/index.mjs';
+
+const rng = mulberry32(20261014);
+const COLORS = ['#3b6cf6', '#e5484d', '#2f9e44', '#b8860b', '#8b5cf6'];
+
+function fitCanvas(cv) {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = cv.getBoundingClientRect();
+  cv.width = rect.width * dpr;
+  cv.height = rect.height * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w: rect.width, h: rect.height };
+}
+
+/* ---------- ① PCA ---------- */
+(() => {
+  const cv = document.getElementById('pca');
+  const { ctx, w, h } = fitCanvas(cv);
+  // 3D 强相关数据
+  const X = Array.from({ length: 160 }, () => {
+    const a = rng() * 2 - 1, b = rng() * 2 - 1;
+    return [a, 0.85 * a + 0.15 * b, 0.6 * a - 0.4 * b + rng() * 0.3];
+  });
+  const model = pca(X);
+  document.getElementById('v1').textContent = (model.cumulative[0] * 100).toFixed(1) + '%';
+  document.getElementById('v2').textContent = (model.cumulative[1] * 100).toFixed(1) + '%';
+  // 投影到 PC1, PC2
+  const proj = X.map(x => {
+    const p1 = x.reduce((s, v, j) => s + (v - model.mu[j]) * model.components[0][j], 0);
+    const p2 = x.reduce((s, v, j) => s + (v - model.mu[j]) * model.components[1][j], 0);
+    return [p1, p2];
+  });
+  drawScatter(ctx, w, h, proj, COLORS[0]);
+})();
+
+/* ---------- ② k-means ---------- */
+(() => {
+  const cv = document.getElementById('kmeans');
+  const { ctx, w, h } = fitCanvas(cv);
+  const centers = [[0, 0], [4, 4], [-4, 4]];
+  const pts = [];
+  for (const c of centers) for (let i = 0; i < 50; i++) pts.push([c[0] + rng(), c[1] + rng()]);
+  const { centroids, labels, inertiaHistory, inertia } = kmeans(pts, 3, rng, 50);
+  document.getElementById('inertia').textContent = inertia.toFixed(2);
+  document.getElementById('iters').textContent = inertiaHistory.length;
+  // 归一化到画布
+  const b = bbox(pts);
+  const toPx = (p) => [ (p[0]-b.x0)/(b.x1-b.x0)*(w-40)+20, h-20-((p[1]-b.y0)/(b.y1-b.y0)*(h-40)) ];
+  for (let i = 0; i < pts.length; i++) {
+    const [px, py] = toPx(pts[i]);
+    ctx.fillStyle = COLORS[labels[i] % COLORS.length];
+    ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI*2); ctx.fill();
+  }
+  for (let c = 0; c < centroids.length; c++) {
+    const [px, py] = toPx(centroids[c]);
+    ctx.strokeStyle = '#1f2430'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI*2); ctx.stroke();
+  }
+})();
+
+/* ---------- ③ MLP ---------- */
+(async () => {
+  const cv = document.getElementById('mlp');
+  const { ctx, w, h } = fitCanvas(cv);
+  const net = makeMLP([2, 16, 16, 3]);
+  const { X, y } = makeSpiral(100, 3, rng);
+  let m = null, v = null;
+  const iters = 220, lr = 0.12;
+  let lastLoss = 0, acc = 0;
+  // 决策边界网格
+  const GX = 60, GY = 40;
+  const grid = [];
+  const gx0=-7, gx1=7, gy0=-7, gy1=7;
+  const classify = (px, py) => {
+    const out = net.forward([px, py]);
+    let bi = 0; for (let i=1;i<out.length;i++) if (out[i].data > out[bi].data) bi=i; return bi;
+  };
+  const render = () => {
+    ctx.clearRect(0,0,w,h);
+    const cw = w/GX, ch = h/GY;
+    for (let i=0;i<GX;i++) for (let j=0;j<GY;j++) {
+      const px = gx0 + (i+0.5)/GX*(gx1-gx0);
+      const py = gy0 + (j+0.5)/GY*(gy1-gy0);
+      const c = classify(px, py);
+      ctx.fillStyle = COLORS[c % COLORS.length] + '22';
+      ctx.fillRect(i*cw, h-(j+1)*ch, cw+1, ch+1);
+    }
+    // 数据点
+    const toPx = (p) => [ (p[0]-gx0)/(gx1-gx0)*w, h-(p[1]-gy0)/(gy1-gy0)*h ];
+    for (let i=0;i<X.length;i++) {
+      const [px,py] = toPx(X[i]);
+      ctx.fillStyle = COLORS[y[i] % COLORS.length];
+      ctx.beginPath(); ctx.arc(px,py,2.4,0,Math.PI*2); ctx.fill();
+    }
+  };
+  for (let it=0; it<iters; it++) {
+    let loss = new Value(0);
+    let correct = 0;
+    for (let s=0;s<X.length;s++) {
+      const logits = net.forward(X[s].map(v=>new Value(v)));
+      const maxL = Math.max(...logits.map(l=>l.data));
+      const mval = new Value(maxL);
+      const es = logits.map(l=>l.sub(mval).exp());
+      const sumE = es.reduce((a,b)=>a.add(b), new Value(0));
+      const p = es[y[s]].div(sumE);
+      loss = loss.add(p.log().mul(-1));
+      let pred=0; for(let k=1;k<logits.length;k++) if(logits[k].data>logits[pred].data) pred=k;
+      if(pred===y[s]) correct++;
+    }
+    loss = loss.div(X.length);
+    for (const p of net.params) p.grad = 0;
+    loss.backward();
+    const step = adamStep(net.params, lr, 0.9, 0.999, 1e-8, it+1, m, v);
+    m = step.m; v = step.v;
+    lastLoss = loss.data; acc = correct/X.length;
+    if (it % 20 === 0 || it === iters-1) render();
+    await new Promise(r=>setTimeout(r,0));
+  }
+  document.getElementById('acc').textContent = (acc*100).toFixed(1)+'%';
+  document.getElementById('loss').textContent = lastLoss.toFixed(4);
+  document.getElementById('accbar').style.width = (acc*100).toFixed(0)+'%';
+})();
+
+/* ---------- ④ 注意力 ---------- */
+(() => {
+  const cv = document.getElementById('attn');
+  const { ctx, w, h } = fitCanvas(cv);
+  const T = 6, dk = 5;
+  const Q = Array.from({length:T},()=>Array.from({length:dk},()=>rng()*2-1));
+  const K = Array.from({length:T},()=>Array.from({length:dk},()=>rng()*2-1));
+  const Wm = attentionWeights(Q, K, dk);
+  const cell = Math.min(w, h)/T;
+  const ox = (w-cell*T)/2, oy = (h-cell*T)/2;
+  for (let i=0;i<T;i++) for (let j=0;j<T;j++) {
+    const a = Wm[i][j];
+    const alpha = Math.min(1, a*2);
+    ctx.fillStyle = `rgba(59,108,246,${alpha.toFixed(3)})`;
+    ctx.fillRect(ox+j*cell, oy+i*cell, cell-2, cell-2);
+    ctx.fillStyle = alpha > 0.55 ? '#fff' : '#1f2430';
+    ctx.font = '10px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(a.toFixed(2), ox+j*cell+cell/2, oy+i*cell+cell/2);
+  }
+  const maxDev = Math.max(...Wm.map(row=>Math.abs(row.reduce((a,b)=>a+b,0)-1)));
+  document.getElementById('rowsum').textContent = maxDev.toExponential(2);
+})();
+
+/* ---------- helpers ---------- */
+function drawScatter(ctx, w, h, pts, color) {
+  const b = bbox(pts);
+  for (const p of pts) {
+    const px = (p[0]-b.x0)/(b.x1-b.x0)*(w-40)+20;
+    const py = h-20-((p[1]-b.y0)/(b.y1-b.y0)*(h-40));
+    ctx.fillStyle = color + 'aa';
+    ctx.beginPath(); ctx.arc(px, py, 2.6, 0, Math.PI*2); ctx.fill();
+  }
+}
+function bbox(pts) {
+  let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+  for (const p of pts) { x0=Math.min(x0,p[0]); x1=Math.max(x1,p[0]); y0=Math.min(y0,p[1]); y1=Math.max(y1,p[1]); }
+  return { x0, x1, y0, y1 };
+}
+</script>
+</body>
+</html>
